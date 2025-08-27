@@ -29,12 +29,3 @@ AGENTOPS_API_KEY=key
 LANGFUSE_SECRET_KEY=key
 LANGFUSE_PUBLIC_KEY=key
 LANGFUSE_ENVIRONMENT="DEV"
-
-### Testar no Postman
-curl --location 'http://localhost:8000/classify' \
---header 'Content-Type: application/json' \
---data '{
-        "user_id": "11946126189",
-        "session_id": "session_012",
-        "reclamacao": "Minha internet 5g não funciona e já liguei várias vezes para o suporte."
-      }'
