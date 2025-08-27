@@ -1,0 +1,40 @@
+
+# Ambiente Virtual 
+python3 -m venv venv
+source venv/bin/activate
+
+### Comando para instalar 
+pip install -r requirements.txt
+
+## Comando para iniciar aplicacao
+
+### FastAPI
+uvicorn app.main:app --reload  
+
+#### Web 
+Adk Web
+
+### Observalidade 
+pip install agentops
+pip install langfuse google-adk -q
+
+
+## Criar Arquivo .env
+
+GOOGLE_API_KEY=key
+GOOGLE_GENAI_USE_VERTEXAI=FALSE
+GOOGLE_CLOUD_PROJECT=YOUR_PROJECT_ID
+GOOGLE_CLOUD_LOCATION=LOCATION
+AGENTOPS_API_KEY=key
+LANGFUSE_SECRET_KEY=key
+LANGFUSE_PUBLIC_KEY=key
+LANGFUSE_ENVIRONMENT="DEV"
+
+### Testar no Postman
+curl --location 'http://localhost:8000/classify' \
+--header 'Content-Type: application/json' \
+--data '{
+        "user_id": "11946126189",
+        "session_id": "session_012",
+        "reclamacao": "Minha internet 5g não funciona e já liguei várias vezes para o suporte."
+      }'

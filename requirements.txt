@@ -1,0 +1,6 @@
+fastapi[standard]
+uvicorn[standard]
+google-adk
+google-genai
+python-dotenv
+Langfuse
