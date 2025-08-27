@@ -1,43 +1,42 @@
 import os
-import pandas as pd
-from typing import Optional
+from pathlib import Path
 from dotenv import load_dotenv
-from google.adk.agents import Agent  # ADK Python
+from google.adk.agents import Agent
 from .io_utils import load_first_sheet, save_layout
 from .rules import compute_layout, validate
 
 load_dotenv()
 
-def load_bases(
-    base_dir: str,
-    arquivos: dict
-) -> dict:
-    """Carrega as planilhas necessárias (primeira aba) a partir de caminhos."""
-    def maybe(name): 
-        path = os.path.join(base_dir, arquivos.get(name,""))
-        return load_first_sheet(path) if arquivos.get(name) else None
+def load_bases(base_dir: str, arquivos: dict) -> dict:
+    """Carrega planilhas a partir do diretório base (relativo ou seguro)."""
+    
+    # força base_dir como Path relativo seguro
+    base_dir = Path(base_dir).resolve()  # caminho absoluto do projeto
+    base_dir.mkdir(parents=True, exist_ok=True)  # garante que a pasta exista
+
+    def maybe(name):
+        filename = arquivos.get(name, "")
+        if not filename:
+            return None
+        path = base_dir / filename
+        return load_first_sheet(path)
 
     return {
-        "ativos"     : maybe("ATIVOS"),
-        "deslig"     : maybe("DESLIGADOS"),
-        "adm"        : maybe("ADMISSAO"),
-        "afast"      : maybe("AFASTAMENTOS"),
-        "aprendiz"   : maybe("APRENDIZ"),
-        "estagio"    : maybe("ESTAGIO"),
-        "diasuteis"  : maybe("BASE_DIAS_UTEIS"),
-        "sind_valor" : maybe("BASE_SINDICATO_VALOR"),
-        "ferias"     : maybe("FERIAS"),
-        "exterior"   : maybe("EXTERIOR"),
+        "ativos": maybe("ATIVOS"),
+        "deslig": maybe("DESLIGADOS"),
+        "adm": maybe("ADMISSAO"),
+        "afast": maybe("AFASTAMENTOS"),
+        "aprendiz": maybe("APRENDIZ"),
+        "estagio": maybe("ESTAGIO"),
+        "diasuteis": maybe("BASE_DIAS_UTEIS"),
+        "sind_valor": maybe("BASE_SINDICATO_VALOR"),
+        "ferias": maybe("FERIAS"),
+        "exterior": maybe("EXTERIOR"),
     }
 
-def gerar_compra_vr(
-    base_dir: str,
-    saida_arquivo: str,
-    arquivos: dict,
-) -> dict:
-    """Gera o layout de compra VR/VA e salva em Excel."""
+def gerar_compra_vr(base_dir: str, saida_arquivo: str, arquivos: dict) -> dict:
+    """Gera layout VR/VA e salva em Excel."""
     bases = load_bases(base_dir, arquivos)
-    # TODO: quando FERIAS e EXTERIOR forem fornecidos, aplicar mais exclusões por MATRÍCULA
     layout = compute_layout(
         ativos=bases["ativos"],
         deslig=bases["deslig"],
@@ -49,22 +48,28 @@ def gerar_compra_vr(
         sind_valor=bases["sind_valor"]
     )
     issues = validate(layout)
-    path = save_layout(layout, os.path.join(base_dir, saida_arquivo))
-    return {"status":"ok","arquivo":path,"avisos":issues, "linhas":len(layout)}
 
-# Opcional: tool de “inspeção” de colunas para ajudar mapeamentos
+    # Salva saída em caminho seguro
+    base_dir = Path(base_dir)
+    base_dir.mkdir(parents=True, exist_ok=True)  # garante que a pasta exista
+    path = save_layout(layout, base_dir / saida_arquivo)
+
+    return {"status": "ok", "arquivo": str(path), "avisos": issues, "linhas": len(layout)}
+
 def inspecionar_colunas(base_dir: str, arquivo: str) -> dict:
-    df = load_first_sheet(os.path.join(base_dir, arquivo))
+    df = load_first_sheet(Path(base_dir) / arquivo)
     return {"arquivo": arquivo, "colunas": list(df.columns), "amostra": df.head(5).to_dict(orient="records")}
 
-# Agente raiz (pode rodar localmente ou no Dev UI do ADK)
+# Agente raiz
 root_agent = Agent(
     name="vr_compra_agent",
-    model="gemini-2.5-pro",   # ajuste conforme preferência/limite
-    description="Agente que consolida bases e gera o layout de compra de VR/VA.",
+    model="gemini-2.5-pro",
+    description="Agente que consolida bases e gera layout de compra VR/VA.",
     instruction=(
-        "Você é um agente especialista em benefícios. "
-        "Quando solicitado, chame as ferramentas para inspecionar arquivos ou gerar o layout."
+        """
+        Você é o Vr_Agent, responsável por consolidar e calcular corretamente a planilha de compra de Vale Refeição (VR).  
+        Leia e processe os arquivos da pasta ./data (documentação) e siga as regras de cálculo.
+        """
     ),
     tools=[gerar_compra_vr, inspecionar_colunas],
 )
