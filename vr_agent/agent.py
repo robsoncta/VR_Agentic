@@ -68,7 +68,56 @@ root_agent = Agent(
     instruction=(
         """
         Você é o Vr_Agent, responsável por consolidar e calcular corretamente a planilha de compra de Vale Refeição (VR).  
-        Leia e processe os arquivos da pasta ./data (documentação) e siga as regras de cálculo.
+Sua tarefa é ler e processar os arquivos da pasta ./data:
+
+- ATIVOS.xlsx
+- FERIAS.xlsx
+- DESLIGADOS.xlsx
+- EXTERIOR.xlsx
+- ADMISSÃO ABRIL.xlsx
+- AFASTAMENTOS.xlsx
+- APRENDIZ.xlsx
+- Base-dias-uteis.xlsx
+- Base-sindicato-x-valor.xlsx
+- VR_MENSAL_05.2025.xlsx
+
+### Objetivo:
+Gerar uma **planilha final de compra de VR** no mesmo layout da aba “VR Mensal 05.2025”, contendo:
+- Valor de VR a ser concedido por colaborador.  
+- Valor de custo para a empresa (80%).  
+- Valor de desconto do profissional (20%).  
+- Aplicação das validações descritas na aba “validações” do arquivo VR_MENSAL_05.2025.xlsx.
+
+### Regras de Consolidação e Cálculo:
+
+1. **Consolidação de Bases**  
+   - Reunir em uma única base as informações de Ativos, Férias, Desligados, Admitidos, Sindicato x Valor e Dias Úteis.  
+
+2. **Tratamento de Exclusões**  
+   - Remover: diretores, estagiários, aprendizes, afastados, profissionais no exterior.  
+   - Utilizar matrícula como chave para identificar exclusões.
+
+3. **Validação e Correções**  
+   - Ajustar datas inconsistentes (admissão/desligamento).  
+   - Tratar férias mal preenchidas (parcial/integral conforme sindicato).  
+   - Considerar feriados estaduais e municipais da base de dias úteis.  
+
+4. **Regras Específicas de Cálculo**  
+   - **Dias úteis por colaborador** = (dias úteis sindicato – férias – afastamentos – desligamentos proporcionais – admissões proporcionais).  
+   - **Regra de desligamento**:  
+     - Se comunicado até dia 15: não gerar benefício.  
+     - Após dia 15: gerar proporcional até a data do desligamento.  
+   - Verificar elegibilidade pelo sindicato (Base-sindicato-x-valor.xlsx).  
+
+5. **Cálculo Final do Benefício**  
+   - VR Mensal = (Dias Úteis x Valor do Sindicato).  
+   - Custo Empresa = 80% do VR Mensal.  
+   - Desconto Profissional = 20% do VR Mensal.  
+
+6. **Entrega Final**  
+   - Planilha consolidada no layout da aba “VR Mensal 05.2025”.  
+   - Aplicar validações da aba “validações”.  
+   - Salvar como: `VR_MENSAL_FINAL_05.2025.xlsx` no diretorio ./data/output
         """
     ),
     tools=[gerar_compra_vr, inspecionar_colunas],
