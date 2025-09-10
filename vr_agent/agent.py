@@ -9,17 +9,22 @@ load_dotenv()
 
 def load_bases(base_dir: str, arquivos: dict) -> dict:
     """Carrega planilhas a partir do diretório base (relativo ou seguro)."""
-    
-    # força base_dir como Path relativo seguro
-    base_dir = Path(base_dir).resolve()  # caminho absoluto do projeto
-    base_dir.mkdir(parents=True, exist_ok=True)  # garante que a pasta exista
+    print("Debug arquivos:", arquivos)  # Para inspecionar entrada
+    base_dir = Path(base_dir).resolve()
+    base_dir.mkdir(parents=True, exist_ok=True)
 
     def maybe(name):
         filename = arquivos.get(name, "")
-        if not filename:
+        print(f"Debug {name}: filename={filename}, type={type(filename)}")
+        if not isinstance(filename, str) or not filename:
+            print(f"Aviso: {name} ignorado (filename inválido: {filename})")
             return None
-        path = base_dir / filename
-        return load_first_sheet(path)
+        try:
+            path = base_dir / filename
+            return load_first_sheet(path)
+        except Exception as e:
+            print(f"Erro ao carregar {name}: {e}")
+            return None
 
     return {
         "ativos": maybe("ATIVOS"),
@@ -27,10 +32,10 @@ def load_bases(base_dir: str, arquivos: dict) -> dict:
         "adm": maybe("ADMISSAO"),
         "afast": maybe("AFASTAMENTOS"),
         "aprendiz": maybe("APRENDIZ"),
-        "estagio": maybe("ESTAGIO"),
+        "estagio": maybe("ESTÁGIO"),
         "diasuteis": maybe("BASE_DIAS_UTEIS"),
         "sind_valor": maybe("BASE_SINDICATO_VALOR"),
-        "ferias": maybe("FERIAS"),
+        "ferias": maybe("FÉRIAS"),
         "exterior": maybe("EXTERIOR"),
     }
 
@@ -71,14 +76,14 @@ root_agent = Agent(
 Sua tarefa é ler e processar os arquivos da pasta ./data:
 
 - ATIVOS.xlsx
-- FERIAS.xlsx
+- FÉRIAS.xlsx
 - DESLIGADOS.xlsx
 - EXTERIOR.xlsx
 - ADMISSÃO ABRIL.xlsx
 - AFASTAMENTOS.xlsx
 - APRENDIZ.xlsx
-- Base-dias-uteis.xlsx
-- Base-sindicato-x-valor.xlsx
+- BASE_DIAS_UTEIS.xlsx
+- BASE_SINDICATO_VALOR.xlsx
 - VR_MENSAL_05.2025.xlsx
 
 ### Objetivo:
@@ -94,7 +99,7 @@ Gerar uma **planilha final de compra de VR** no mesmo layout da aba “VR Mensal
    - Reunir em uma única base as informações de Ativos, Férias, Desligados, Admitidos, Sindicato x Valor e Dias Úteis.  
 
 2. **Tratamento de Exclusões**  
-   - Remover: diretores, estagiários, aprendizes, afastados, profissionais no exterior.  
+   - Remover: diretores, estagiários, aprendizes, , profissionais no exterior.  
    - Utilizar matrícula como chave para identificar exclusões.
 
 3. **Validação e Correções**  
@@ -103,7 +108,7 @@ Gerar uma **planilha final de compra de VR** no mesmo layout da aba “VR Mensal
    - Considerar feriados estaduais e municipais da base de dias úteis.  
 
 4. **Regras Específicas de Cálculo**  
-   - **Dias úteis por colaborador** = (dias úteis sindicato – férias – afastamentos – desligamentos proporcionais – admissões proporcionais).  
+   - **Dias úteis por colaborador** = (dias úteis sindicato – férias –  – desligamentos proporcionais – admissões proporcionais).  
    - **Regra de desligamento**:  
      - Se comunicado até dia 15: não gerar benefício.  
      - Após dia 15: gerar proporcional até a data do desligamento.  
