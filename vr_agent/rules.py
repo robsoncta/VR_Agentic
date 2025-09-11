@@ -2,6 +2,31 @@ import pandas as pd
 from datetime import datetime
 
 
+def normalize_cols(df: pd.DataFrame) -> pd.DataFrame:
+    """Normaliza nomes de colunas."""
+    if df is None:
+        return None
+    df.columns = (
+        df.columns.str.strip()
+        .str.upper()
+        .str.replace("\xa0", "", regex=True)
+    )
+    return df
+
+def sanitize_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Remove linhas totalmente nulas, converte NaN para 0 e remove caracteres invisíveis."""
+    if df is None:
+        return None
+
+    df = df.dropna(how="all")  # remove linhas 100% vazias
+    df = df.where(pd.notnull(df), 0)  # converte NaN → 0
+
+    # Remove caracteres invisíveis de todas as colunas de texto
+    for col in df.select_dtypes(include=["object", "string"]):
+        df[col] = df[col].astype(str).str.replace(r"[\u200B\u200C\u200D\uFEFF]", "", regex=True)
+
+    return df
+
 def compute_layout(
     ativos: pd.DataFrame,
     deslig: pd.DataFrame = None,
@@ -17,9 +42,31 @@ def compute_layout(
     """Aplica todas as regras de consolidação e retorna o layout final."""
 
     if ativos is None:
-        raise ValueError("A base ATIVOS.xlsx não foi carregada.")
+        raise ValueError("A base ATIVOS.xlsx contem None.")
+
+    # ==============================
+    # Normalização e sanitização
+    # ==============================
+    ativos = sanitize_df(normalize_cols(ativos))
+    deslig = sanitize_df(normalize_cols(deslig)) if deslig is not None else None
+    adm = sanitize_df(normalize_cols(adm)) if adm is not None else None
+    afast = sanitize_df(normalize_cols(afast)) if afast is not None else None
+    aprendiz = sanitize_df(normalize_cols(aprendiz)) if aprendiz is not None else None
+    estagio = sanitize_df(normalize_cols(estagio)) if estagio is not None else None
+    diasuteis = sanitize_df(normalize_cols(diasuteis)) if diasuteis is not None else None
+    sind_valor = sanitize_df(normalize_cols(sind_valor)) if sind_valor is not None else None
+    ferias = sanitize_df(normalize_cols(ferias)) if ferias is not None else None
+    exterior = sanitize_df(normalize_cols(exterior)) if exterior is not None else None
 
     df = ativos.copy()
+
+    # Sindicato em maiúsculo
+    if "SINDICATO" in df.columns:
+        df["SINDICATO"] = df["SINDICATO"].str.upper().str.strip()
+
+    # Estado em maiúsculo
+    if sind_valor is not None and "ESTADO" in sind_valor.columns:
+        sind_valor["ESTADO"] = sind_valor["ESTADO"].str.upper().str.strip()
 
     # ==========================================================
     # 1. Filtrar apenas funcionários ativos
@@ -66,14 +113,33 @@ def compute_layout(
     # ==========================================================
     # 6. Adicionar base de dias úteis por sindicato
     # ==========================================================
-    if diasuteis is not None and "Sindicato" in diasuteis.columns:
-        df = df.merge(diasuteis, on="Sindicato", how="left")
+    if diasuteis is not None:
+        diasuteis.columns = diasuteis.columns.str.upper().str.strip()
+        if "SINDICATO" not in diasuteis.columns:
+            diasuteis = diasuteis.rename(
+                columns={
+                    "BASE DIAS UTEIS DE 15/04 A 15/05": "SINDICATO",
+                    "UNNAMED: 1": "DIAS_UTEIS",
+                }
+            )
+            diasuteis = diasuteis.drop(0, errors="ignore")
+
+        diasuteis["SINDICATO"] = diasuteis["SINDICATO"].str.upper().str.strip()
+        df = df.merge(diasuteis, on="SINDICATO", how="left")
 
     # ==========================================================
     # 7. Adicionar valor de VR por sindicato
     # ==========================================================
-    if sind_valor is not None and "Sindicato" in sind_valor.columns:
-        df = df.merge(sind_valor, on="Sindicato", how="left")
+    if sind_valor is not None:
+        map_estado_sind = {
+            "SÃO PAULO": "SINDPD SP - SIND.TRAB.EM PROC DADOS E EMPR.EMP...",
+            "RIO GRANDE DO SUL": "SINDPPD RS - SINDICATO DOS TRAB. EM PROC. DE D...",
+            "PARANÁ": "SITEPD PR - SIND DOS TRAB EM EMPR PRIVADAS DE ...",
+            "RIO DE JANEIRO": "SINDPD RJ - SINDICATO PROFISSIONAIS DE PROC DA...",
+        }
+
+        sind_valor["SINDICATO"] = sind_valor["ESTADO"].map(map_estado_sind)
+        df = df.merge(sind_valor[["SINDICATO", "VALOR"]], on="SINDICATO", how="left")
 
     # ==========================================================
     # 8. Regras de desligados
@@ -82,15 +148,12 @@ def compute_layout(
         deslig["DATA DEMISSÃO"] = pd.to_datetime(deslig["DATA DEMISSÃO"], errors="coerce")
         cutoff = datetime(2025, 5, 15)
 
-        # Marca quem sai antes do corte
         desligados_antes = deslig[
             (deslig["COMUNICADO DE DESLIGAMENTO"].str.upper() == "OK")
             & (deslig["DATA DEMISSÃO"] <= cutoff)
         ]["MATRICULA"]
-
         df = df[~df["MATRICULA"].isin(desligados_antes)]
 
-        # Quem sai depois do corte → cálculo proporcional
         desligados_depois = deslig[
             (deslig["COMUNICADO DE DESLIGAMENTO"].str.upper() == "OK")
             & (deslig["DATA DEMISSÃO"] > cutoff)
@@ -98,41 +161,40 @@ def compute_layout(
         for _, row in desligados_depois.iterrows():
             mat = row["MATRICULA"]
             data_dem = row["DATA DEMISSÃO"]
-            if mat in df["MATRICULA"].values and "Dias_Uteis" in df.columns:
-                dias_total = df.loc[df["MATRICULA"] == mat, "Dias_Uteis"].values[0]
+            if mat in df["MATRICULA"].values and "DIAS_UTEIS" in df.columns:
+                dias_total = df.loc[df["MATRICULA"] == mat, "DIAS_UTEIS"].values[0]
                 dias_trabalhados = max((data_dem - cutoff).days, 0)
-                df.loc[df["MATRICULA"] == mat, "Dias_Uteis"] = dias_trabalhados
+                df.loc[df["MATRICULA"] == mat, "DIAS_UTEIS"] = dias_trabalhados
 
     # ==========================================================
-    # 9. Admissões em abril (calcular proporcional)
+    # 9. Admissões em abril (proporcional)
     # ==========================================================
-    if adm is not None and {"MATRICULA", "Admissao"}.issubset(adm.columns):
-        adm["Admissao"] = pd.to_datetime(adm["Admissao"], errors="coerce")
+    if adm is not None and {"MATRICULA", "ADMISSAO"}.issubset(adm.columns):
+        adm["ADMISSAO"] = pd.to_datetime(adm["ADMISSAO"], errors="coerce")
         for _, row in adm.iterrows():
             mat = row["MATRICULA"]
-            adm_data = row["Admissao"]
-            if mat in df["MATRICULA"].values and "Dias_Uteis" in df.columns:
-                dias_total = df.loc[df["MATRICULA"] == mat, "Dias_Uteis"].values[0]
+            adm_data = row["ADMISSAO"]
+            if mat in df["MATRICULA"].values and "DIAS_UTEIS" in df.columns:
+                dias_total = df.loc[df["MATRICULA"] == mat, "DIAS_UTEIS"].values[0]
                 if pd.notna(adm_data):
                     dias_proporcionais = max(dias_total - (adm_data.day - 1), 0)
-                    df.loc[df["MATRICULA"] == mat, "Dias_Uteis"] = dias_proporcionais
+                    df.loc[df["MATRICULA"] == mat, "DIAS_UTEIS"] = dias_proporcionais
 
     # ==========================================================
-    # 10. Calcular coluna final de Valor_VR
+    # 10. Calcular coluna final de VALOR_VR
     # ==========================================================
-    if "Dias_Uteis" in df.columns:
-        valor_col = None
-        for col in ["Valor", "VR_Valor", "VALOR", "Valor_Sindicato"]:
-            if col in df.columns:
-                valor_col = col
-                break
-        if valor_col:
-            df["Valor_VR"] = df["Dias_Uteis"].fillna(0) * df[valor_col].fillna(0)
-        else:
-            df["Valor_VR"] = 0
+    valor_col = next((c for c in ["VALOR", "VR_VALOR", "VALOR_SINDICATO", "Valor", "Valor_Sindicato"] if c in df.columns), None)
+
+    if valor_col and "DIAS_UTEIS" in df.columns:
+        df["VALOR_VR"] = (
+            pd.to_numeric(df["DIAS_UTEIS"], errors="coerce").fillna(0)
+            * pd.to_numeric(df[valor_col], errors="coerce").fillna(0)
+        )
     else:
-        df["Valor_VR"] = 0
+        df["VALOR_VR"] = 0
 
+    # 🔎 Sanitiza para garantir que não sobra NaN/None no resultado
+    df = sanitize_df(df)
     return df
 
 
@@ -146,13 +208,17 @@ def validate(df: pd.DataFrame) -> list:
     if df.empty:
         issues.append("Layout final está vazio.")
 
-    if "Dias_Uteis" not in df.columns:
-        issues.append("Coluna Dias_Uteis ausente no resultado final.")
+    if "DIAS_UTEIS" not in df.columns:
+        issues.append("Coluna DIAS_UTEIS ausente no resultado final.")
 
-    if "Sindicato" not in df.columns:
-        issues.append("Coluna Sindicato ausente no resultado final.")
+    if "SINDICATO" not in df.columns:
+        issues.append("Coluna SINDICATO ausente no resultado final.")
 
-    if "Valor_VR" not in df.columns:
-        issues.append("Coluna Valor_VR não foi gerada.")
+    if "VALOR_VR" not in df.columns:
+        issues.append("Coluna VALOR_VR não foi gerada.")
+
+    if df.isnull().any().any():
+        null_cols = df.columns[df.isnull().any()].tolist()
+        issues.append(f"Existem valores NaN/None nas colunas: {null_cols}")
 
     return issues

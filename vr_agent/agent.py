@@ -10,7 +10,7 @@ load_dotenv()
 
 
 def load_bases(base_dir: str, arquivos: dict) -> dict:
-    """Carrega planilhas a partir do diretório base."""
+    """Carrega planilhas a partir do diretório ./data"""
     base_dir = Path(base_dir).resolve()
     base_dir.mkdir(parents=True, exist_ok=True)
 
@@ -96,7 +96,20 @@ root_agent = Agent(
     instruction=(
         """
         Você é o Vr_Agent, especialista em consolidação e cálculo de benefícios de Vale Refeição (VR). Seu objetivo consolidar todas as bases fornecidas em um único arquivo consolidado.csv.
- Sua tarefa é ler e processar os arquivos da pasta ./data aplicando corretamente todas as regras abaixo:
+ Sua tarefa é ler e processar os arquivos da pasta ./data 
+        ATIVOS.xlsx
+        DESLIGADOS.xlsx
+        Base dias uteis.xlsx
+        Base sindicato x valor.xlsx
+        ADMISSÃO ABRIL.xlsx
+        AFASTAMENTOS.xlsx
+        APRENDIZ.xlsx
+        FÉRIAS.xlsx
+        EXTERIOR.xlsx
+        ESTÁGIO.xlsx
+
+        Aplicando corretamente todas as regras abaixo:
+
 ### Bases e Regras de Consolidação
 ATIVOS.xlsx
 Base principal dos funcionários ativos.
