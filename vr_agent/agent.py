@@ -1,35 +1,36 @@
+# vr_agent/agent.py
 import os
 from pathlib import Path
 from dotenv import load_dotenv
 from google.adk.agents import Agent
 from .io_utils import load_first_sheet, save_layout
-from .rules import compute_layout, validate
+from .rules import compute_layout, validate   # ✅ importa do rules.py
 
 load_dotenv()
 
+
 def load_bases(base_dir: str, arquivos: dict) -> dict:
-    """Carrega planilhas a partir do diretório base (relativo ou seguro)."""
-    print("Debug arquivos:", arquivos)  # Para inspecionar entrada
+    """Carrega planilhas a partir do diretório base."""
     base_dir = Path(base_dir).resolve()
     base_dir.mkdir(parents=True, exist_ok=True)
 
     def maybe(name):
-        filename = arquivos.get(name, "")
-        print(f"Debug {name}: filename={filename}, type={type(filename)}")
-        if not isinstance(filename, str) or not filename:
-            print(f"Aviso: {name} ignorado (filename inválido: {filename})")
+        filename = (
+            arquivos.get(name)
+            or arquivos.get(f"{name}.xlsx")
+            or arquivos.get(f"{name}.xls")
+        )
+        if not filename:
             return None
-        try:
-            path = base_dir / filename
-            return load_first_sheet(path)
-        except Exception as e:
-            print(f"Erro ao carregar {name}: {e}")
-            return None
+        path = base_dir / filename
+        if not path.exists():
+            raise FileNotFoundError(f"Arquivo esperado não encontrado: {path}")
+        return load_first_sheet(path)
 
     return {
         "ativos": maybe("ATIVOS"),
         "deslig": maybe("DESLIGADOS"),
-        "adm": maybe("ADMISSAO"),
+        "adm": maybe("ADMISSÃO ABRIL"),
         "afast": maybe("AFASTAMENTOS"),
         "aprendiz": maybe("APRENDIZ"),
         "estagio": maybe("ESTÁGIO"),
@@ -39,9 +40,15 @@ def load_bases(base_dir: str, arquivos: dict) -> dict:
         "exterior": maybe("EXTERIOR"),
     }
 
+
 def gerar_compra_vr(base_dir: str, saida_arquivo: str, arquivos: dict) -> dict:
     """Gera layout VR/VA e salva em Excel."""
     bases = load_bases(base_dir, arquivos)
+
+    if bases["ativos"] is None:
+        raise ValueError("A base ATIVOS.xlsx não foi carregada.")
+
+    # ✅ chama regras do rules.py
     layout = compute_layout(
         ativos=bases["ativos"],
         deslig=bases["deslig"],
@@ -50,20 +57,36 @@ def gerar_compra_vr(base_dir: str, saida_arquivo: str, arquivos: dict) -> dict:
         aprendiz=bases["aprendiz"],
         estagio=bases["estagio"],
         diasuteis=bases["diasuteis"],
-        sind_valor=bases["sind_valor"]
+        sind_valor=bases["sind_valor"],
+        ferias=bases["ferias"],
+        exterior=bases["exterior"],
     )
+
+    # ✅ roda validação
     issues = validate(layout)
 
-    # Salva saída em caminho seguro
+    # Salva saída
     base_dir = Path(base_dir)
-    base_dir.mkdir(parents=True, exist_ok=True)  # garante que a pasta exista
+    base_dir.mkdir(parents=True, exist_ok=True)
     path = save_layout(layout, base_dir / saida_arquivo)
 
-    return {"status": "ok", "arquivo": str(path), "avisos": issues, "linhas": len(layout)}
+    return {
+        "status": "ok",
+        "arquivo": str(path),
+        "avisos": issues,
+        "linhas": len(layout),
+    }
+
 
 def inspecionar_colunas(base_dir: str, arquivo: str) -> dict:
+    """Inspeciona colunas e amostra de um arquivo Excel."""
     df = load_first_sheet(Path(base_dir) / arquivo)
-    return {"arquivo": arquivo, "colunas": list(df.columns), "amostra": df.head(5).to_dict(orient="records")}
+    return {
+        "arquivo": arquivo,
+        "colunas": list(df.columns),
+        "amostra": df.head(5).to_dict(orient="records"),
+    }
+
 
 # Agente raiz
 root_agent = Agent(
@@ -72,57 +95,68 @@ root_agent = Agent(
     description="Agente que consolida bases e gera layout de compra VR/VA.",
     instruction=(
         """
-        Você é o Vr_Agent, responsável por consolidar e calcular corretamente a planilha de compra de Vale Refeição (VR).  
-Sua tarefa é ler e processar os arquivos da pasta ./data:
+        Você é o Vr_Agent, especialista em consolidação e cálculo de benefícios de Vale Refeição (VR). Seu objetivo consolidar todas as bases fornecidas em um único arquivo consolidado.csv.
+ Sua tarefa é ler e processar os arquivos da pasta ./data aplicando corretamente todas as regras abaixo:
+### Bases e Regras de Consolidação
+ATIVOS.xlsx
+Base principal dos funcionários ativos.
+Chave primária: MATRICULA.
+Desconsiderar sempre cargos com TITULO DO CARGO = Diretores, Estagiários ou Aprendizes.
+Na coluna DESC. SITUACAO, considerar apenas registros = "Trabalhando".
 
-- ATIVOS.xlsx
-- FÉRIAS.xlsx
-- DESLIGADOS.xlsx
-- EXTERIOR.xlsx
-- ADMISSÃO ABRIL.xlsx
-- AFASTAMENTOS.xlsx
-- APRENDIZ.xlsx
-- BASE_DIAS_UTEIS.xlsx
-- BASE_SINDICATO_VALOR.xlsx
-- VR_MENSAL_05.2025.xlsx
 
-### Objetivo:
-Gerar uma **planilha final de compra de VR** no mesmo layout da aba “VR Mensal 05.2025”, contendo:
-- Valor de VR a ser concedido por colaborador.  
-- Valor de custo para a empresa (80%).  
-- Valor de desconto do profissional (20%).  
-- Aplicação das validações descritas na aba “validações” do arquivo VR_MENSAL_05.2025.xlsx.
+FÉRIAS.xlsx
+Adicionar ao consolidado a coluna DIAS DE FÉRIAS para os funcionários da base ATIVOS.
 
-### Regras de Consolidação e Cálculo:
 
-1. **Consolidação de Bases**  
-   - Reunir em uma única base as informações de Ativos, Férias, Desligados, Admitidos, Sindicato x Valor e Dias Úteis.  
+Base dias uteis.xlsx
+Traz a quantidade de dias úteis por sindicato.
+Adicionar essa informação à tabela ATIVOS pela relação da coluna Sindicato.
 
-2. **Tratamento de Exclusões**  
-   - Remover: diretores, estagiários, aprendizes, , profissionais no exterior.  
-   - Utilizar matrícula como chave para identificar exclusões.
 
-3. **Validação e Correções**  
-   - Ajustar datas inconsistentes (admissão/desligamento).  
-   - Tratar férias mal preenchidas (parcial/integral conforme sindicato).  
-   - Considerar feriados estaduais e municipais da base de dias úteis.  
+Base sindicato x valor.xlsx
+Define o valor do VR por sindicato/estado.
+Relacionar o sindicato do funcionário com o valor correspondente:
+SITEPD PR → Paraná
+SINDPD RJ → Rio de Janeiro
+SINDPD SP → São Paulo
+SINDPPD RS → Rio Grande do Sul
 
-4. **Regras Específicas de Cálculo**  
-   - **Dias úteis por colaborador** = (dias úteis sindicato – férias –  – desligamentos proporcionais – admissões proporcionais).  
-   - **Regra de desligamento**:  
-     - Se comunicado até dia 15: não gerar benefício.  
-     - Após dia 15: gerar proporcional até a data do desligamento.  
-   - Verificar elegibilidade pelo sindicato (Base-sindicato-x-valor.xlsx).  
 
-5. **Cálculo Final do Benefício**  
-   - VR Mensal = (Dias Úteis x Valor do Sindicato).  
-   - Custo Empresa = 80% do VR Mensal.  
-   - Desconto Profissional = 20% do VR Mensal.  
+Incluir essa coluna no consolidado.
 
-6. **Entrega Final**  
-   - Planilha consolidada no layout da aba “VR Mensal 05.2025”.  
-   - Aplicar validações da aba “validações”.  
-   - Salvar como: `VR_MENSAL_FINAL_05.2025.xlsx` no diretorio ./data/output
+
+DESLIGADOS.xlsx
+Regras de exclusão e cálculo proporcional:
+Se COMUNICADO DE DESLIGAMENTO = OK e DATA DEMISSÃO ≤ 15/05/2025, não considerar o funcionário.
+Se DATA DEMISSÃO > 15/05/2025, calcular proporcionalmente os dias úteis de VR até a data de demissão.
+
+
+EXTERIOR.xlsx
+Funcionários fora do país não recebem VR.
+Excluir suas MATRICULAS da base ATIVOS.
+
+
+ADMISSÃO ABRIL.xlsx
+Funcionários admitidos em abril devem ser incluídos na base ATIVOS.
+Calcular dias úteis proporcionalmente a partir da coluna Admissao.
+Substituir a informação de "Base de dias úteis" pelo cálculo proporcional.
+
+
+AFASTAMENTOS.xlsx
+Funcionários afastados devem ser removidos da base ATIVOS.
+
+
+APRENDIZ.xlsx
+Remover aprendizes da base ATIVOS.
+### Saída esperada
+Gerar um único arquivo consolidado.csv e Salvar diretorio ./data/output
+Cada linha deve representar um funcionário válido para o benefício de VR.
+Colunas esperadas:
+ MATRICULA, NOME, TITULO DO CARGO, SINDICATO, DIAS_UTEIS, DIAS_DE_FERIAS, VR_VALOR, VR_CALCULADO, DATA_ADMISSAO, DATA_DEMISSAO (se aplicável)
+O campo VR_CALCULADO deve ser o resultado: (Dias úteis considerados - Dias de Férias) × Valor Sindicato
+Ajustado proporcionalmente nos casos de admissão em abril ou demissão após 15/05/2025.
+
         """
     ),
     tools=[gerar_compra_vr, inspecionar_colunas],
