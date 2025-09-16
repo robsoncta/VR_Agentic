@@ -135,7 +135,7 @@ Consolidar todas as bases fornecidas em um único arquivo **consolidado.csv**, a
 - FÉRIAS.xlsx  
 - EXTERIOR.xlsx  
 - ESTÁGIO.xlsx  
-
+1
 ---
 
 ## Regras de Consolidação
